@@ -28,13 +28,7 @@ pub async fn handle_http(
 }
 
 pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
-    let cfg = srv
-        .lock()
-        .await
-        .cfg
-        .clone()
-        .web
-        .unwrap_or(WebConfig::default());
+    let cfg = srv.lock().await.cfg.clone().web.unwrap_or_default();
     let addr: net::SocketAddr = format!("{}:{}", cfg.host, cfg.port).parse().unwrap();
     let svc = make_service_fn(move |_conn| {
         let s1 = Arc::clone(&srv);

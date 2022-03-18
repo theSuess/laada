@@ -84,13 +84,7 @@ impl LdapSession {
 }
 
 pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
-    let cfg = srv
-        .lock()
-        .await
-        .cfg
-        .clone()
-        .ldap
-        .unwrap_or(LDAPConfig::default());
+    let cfg = srv.lock().await.cfg.clone().ldap.unwrap_or_default();
     let addr: net::SocketAddr = format!("{}:{}", cfg.host, cfg.port).parse().unwrap();
     let listener = Box::new(TcpListener::bind(&addr).await.unwrap());
     info!("started ldap listener on {:?}", addr);
