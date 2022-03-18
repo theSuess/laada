@@ -1,0 +1,21 @@
+[package]
+name = "laada"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ldap3_proto = "0.2.2"
+tracing = "0.1"
+tracing-subscriber = "0.2"
+graph-rs-sdk = "0.1.4"
+serde = { version = "1", features = ["derive"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "signal", "macros"] }
+futures = "0.3"
+tokio-util = { version = "0.6", features = ["codec"] }
+log = "0.4.0"
+config = "0.12"
+env_logger = "0.8.4"
+hyper = { version = "0.14", features = ["full"] }
