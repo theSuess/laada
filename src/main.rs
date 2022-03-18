@@ -18,7 +18,7 @@ async fn main() -> Result<(), ::std::io::Error> {
 
     let cfg = Config::builder()
         .add_source(config::File::with_name("laada"))
-        .add_source(config::Environment::with_prefix("LAADA"))
+        .add_source(config::Environment::with_prefix("LAADA").separator("_"))
         .build()
         .unwrap()
         .try_deserialize::<laada::LaadaConfig>()
@@ -28,9 +28,7 @@ async fn main() -> Result<(), ::std::io::Error> {
 
     // Initiate the acceptor task.
     tokio::spawn(ldap::serve(Arc::clone(&srv)));
-    info!("started ldap://127.0.0.1:12345 ...");
     tokio::spawn(http::serve(Arc::clone(&srv)));
-    info!("started http://127.0.0.1:8080 ...");
 
     tokio::signal::ctrl_c().await?;
     Ok(())

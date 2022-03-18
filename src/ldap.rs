@@ -12,6 +12,7 @@ use tokio::net::TcpStream;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::graph::*;
+use crate::laada::LDAPConfig;
 use crate::laada::LaadaServer;
 
 pub struct LdapSession {
@@ -83,8 +84,16 @@ impl LdapSession {
 }
 
 pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
-    let addr = net::SocketAddr::from_str("127.0.0.1:12345").unwrap();
+    let cfg = srv
+        .lock()
+        .await
+        .cfg
+        .clone()
+        .ldap
+        .unwrap_or(LDAPConfig::default());
+    let addr: net::SocketAddr = format!("{}:{}", cfg.host, cfg.port).parse().unwrap();
     let listener = Box::new(TcpListener::bind(&addr).await.unwrap());
+    info!("started ldap listener on {:?}", addr);
     loop {
         match listener.accept().await {
             Ok((socket, _paddr)) => {

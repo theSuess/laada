@@ -7,6 +7,7 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 
 use crate::laada::LaadaServer;
+use crate::laada::WebConfig;
 
 pub async fn handle_http(
     srv: Arc<Mutex<LaadaServer>>,
@@ -27,8 +28,15 @@ pub async fn handle_http(
 }
 
 pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
-    let web_addr = net::SocketAddr::from_str("127.0.0.1:8080").unwrap();
-    let web_svc = make_service_fn(move |_conn| {
+    let cfg = srv
+        .lock()
+        .await
+        .cfg
+        .clone()
+        .web
+        .unwrap_or(WebConfig::default());
+    let addr: net::SocketAddr = format!("{}:{}", cfg.host, cfg.port).parse().unwrap();
+    let svc = make_service_fn(move |_conn| {
         let s1 = Arc::clone(&srv);
         async move {
             Ok::<_, hyper::Error>(service_fn(move |req| {
@@ -37,5 +45,6 @@ pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
             }))
         }
     });
-    Server::bind(&web_addr).serve(web_svc).await;
+    info!("started ldap listener on {:?}", addr);
+    Server::bind(&addr).serve(svc).await;
 }
