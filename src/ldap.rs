@@ -5,14 +5,12 @@ use graph_rs_sdk::prelude::GraphResponse;
 use ldap3_proto::simple::*;
 use ldap3_proto::LdapCodec;
 use std::net;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::graph::*;
-use crate::laada::LDAPConfig;
 use crate::laada::LaadaServer;
 
 pub struct LdapSession {
@@ -34,9 +32,13 @@ impl LdapSession {
     }
 
     pub async fn do_search(&mut self, lsr: &SearchRequest) -> Vec<LdapMsg> {
-        debug!("Base: {:?}", lsr.base);
         let mut srv = self.srv.lock().await;
         let client = &srv.graph_client().await;
+        let cfg = srv.cfg.ldap.clone().unwrap_or_default();
+
+        if lsr.base != "" && lsr.base != cfg.basedn {
+            return vec![lsr.gen_error(LdapResultCode::NoSuchObject, String::from("Not found"))];
+        }
         let user_resp: GraphResult<GraphResponse<ListUserResponse>> =
             client.v1().users().list_user().json().await;
         debug!("Graph api response: {:?}", user_resp);
@@ -48,14 +50,18 @@ impl LdapSession {
             .map(|u| {
                 debug!("user: {:?}", u);
                 lsr.gen_result_entry(LdapSearchResultEntry {
-                    dn: format!("upn={},dc=example,dc=com", u.upn),
+                    dn: format!("userPrincipalName={},{}", u.upn, cfg.basedn),
                     attributes: vec![
                         LdapPartialAttribute {
                             atype: "objectClass".to_string(),
-                            vals: vec!["cursed".to_string()],
+                            vals: vec![
+                                "inetOrgPerson".to_string(),
+                                "person".to_string(),
+                                "top".to_string(),
+                            ],
                         },
                         LdapPartialAttribute {
-                            atype: "upn".to_string(),
+                            atype: "userPrincipalName".to_string(),
                             vals: vec![u.upn.clone()],
                         },
                         LdapPartialAttribute {
@@ -67,7 +73,11 @@ impl LdapSession {
                             vals: vec![u.given_name.clone()],
                         },
                         LdapPartialAttribute {
-                            atype: "surname".to_string(),
+                            atype: "cn".to_string(),
+                            vals: vec![u.given_name.clone()],
+                        },
+                        LdapPartialAttribute {
+                            atype: "sn".to_string(),
                             vals: vec![u.surname.clone()],
                         },
                     ],

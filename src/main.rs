@@ -9,7 +9,6 @@ extern crate log;
 use config::Config;
 use futures::lock::Mutex;
 use laada::LaadaServer;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[tokio::main]

@@ -1,13 +1,10 @@
+use futures::lock::Mutex;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use std::net;
-use std::str::FromStr;
-
-use futures::lock::Mutex;
 use std::sync::Arc;
 
 use crate::laada::LaadaServer;
-use crate::laada::WebConfig;
 
 pub async fn handle_http(
     srv: Arc<Mutex<LaadaServer>>,

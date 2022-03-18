@@ -15,12 +15,14 @@ pub struct LaadaConfig {
 pub struct LDAPConfig {
     pub host: String,
     pub port: u16,
+    pub basedn: String,
 }
 
 impl Default for LDAPConfig {
     fn default() -> Self {
         LDAPConfig {
             host: String::from("0.0.0.0"),
+            basedn: String::from("dc=laada,dc=com"),
             port: 3389,
         }
     }
