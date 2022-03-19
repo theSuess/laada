@@ -62,14 +62,20 @@ impl LaadaServer {
 }
 
 impl LaadaConfig {
-    async fn new_access_token(&self) -> AccessToken {
+    pub fn oauth_client(&self) -> OAuth {
         let mut oauth = OAuth::new();
         oauth
             .client_id(self.client_id.as_str())
             .client_secret(self.client_secret.as_str())
+            .add_scope("offline_access")
             .access_token_url("https://login.microsoftonline.com/common/oauth2/v2.0/token")
             .tenant_id(self.tenant_id.as_str())
+            .response_type("code")
             .add_scope("https://graph.microsoft.com/.default");
+        oauth
+    }
+    async fn new_access_token(&self) -> AccessToken {
+        let mut oauth = self.oauth_client();
         let token = oauth
             .build_async()
             .client_credentials()
@@ -79,5 +85,14 @@ impl LaadaConfig {
             .unwrap();
         trace!("Access Token: {:?}", token);
         token
+    }
+    pub fn oauth_request(&self, redirect_uri: &str) -> String {
+        let mut oauth = self.oauth_client();
+        oauth
+            .redirect_uri(redirect_uri)
+            .build()
+            .code_flow()
+            .authorization_url()
+            .to_string()
     }
 }
