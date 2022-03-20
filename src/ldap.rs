@@ -80,6 +80,10 @@ impl LdapSession {
                             atype: "sn".to_string(),
                             vals: vec![u.surname.clone()],
                         },
+                        LdapPartialAttribute {
+                            atype: "uid".to_string(),
+                            vals: vec![u.id.clone()],
+                        },
                     ],
                 })
             })
