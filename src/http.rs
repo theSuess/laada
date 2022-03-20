@@ -14,7 +14,7 @@ use warp::reject::Reject;
 use warp::{Filter, Rejection, Reply};
 
 use crate::graph::*;
-use crate::laada::LaadaServer;
+use crate::laada::LaadaConfig;
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
@@ -25,14 +25,8 @@ struct Assets;
 struct CryptoError {}
 impl Reject for CryptoError {}
 
-pub async fn login_handler(
-    host: String,
-    srv: Arc<Mutex<LaadaServer>>,
-) -> Result<impl Reply, Rejection> {
-    let url: Uri = srv
-        .lock()
-        .await
-        .cfg
+pub async fn login_handler(host: String, cfg: LaadaConfig) -> Result<impl Reply, Rejection> {
+    let url: Uri = cfg
         .oauth_request(format!("http://{}/login/callback", host).as_str())
         .parse()
         .unwrap();
@@ -42,14 +36,11 @@ pub async fn login_handler(
 pub async fn callback_handler(
     host: String,
     q: HashMap<String, String>,
-    srv: Arc<Mutex<LaadaServer>>,
+    cfg: LaadaConfig,
 ) -> Result<impl Reply, Rejection> {
     let code = q.get("code");
     trace!("Access Code {:?}", code);
-    let mut req = srv
-        .lock()
-        .await
-        .cfg
+    let mut req = cfg
         .oauth_client()
         .access_code(code.unwrap())
         .redirect_uri(format!("http://{}/login/callback", host).as_str())
@@ -76,7 +67,7 @@ pub async fn manage_handler(
         cl.v1().me().get_extensions(EXTENSION_NAME).json().await;
     trace!("found extensions: {:?}", resp);
     // TODO: there has to be a better way
-    let mut claims: HashMap<String, String> = token
+    let claims: HashMap<String, String> = token
         .jwt()
         .unwrap()
         .claims()
@@ -99,17 +90,14 @@ pub async fn manage_handler(
 }
 pub async fn register_handler(
     token: AccessToken,
-    srv: Arc<Mutex<LaadaServer>>,
+    cfg: LaadaConfig,
 ) -> Result<impl Reply, Rejection> {
     let cl: Graph<AsyncHttpClient> = Graph::from(&token);
     let mut token = [0u8; 128];
     let mut nonce = [0u8; 12];
     getrandom::getrandom(&mut token).map_err(|_| warp::reject::custom(CryptoError {}))?;
     getrandom::getrandom(&mut nonce).map_err(|_| warp::reject::custom(CryptoError {}))?;
-    let enc = srv
-        .lock()
-        .await
-        .encrypt_token(&token.to_vec(), &nonce.to_vec());
+    let enc = cfg.encrypt_token(&token.to_vec(), &nonce.to_vec());
     let e = LaadaExtension::new(enc, nonce.to_vec());
     let existing = cl.v1().me().get_extensions(EXTENSION_NAME).send().await;
     if existing.is_err() {
@@ -128,20 +116,18 @@ pub async fn register_handler(
     let totp = TOTPBuilder::new().key(&token).finalize().unwrap();
     Ok(totp.key_uri_format("laada", "test").finalize())
 }
-fn with_srv(
-    srv: Arc<Mutex<LaadaServer>>,
-) -> impl Filter<Extract = (Arc<Mutex<LaadaServer>>,), Error = Infallible> + Clone {
-    warp::any().map(move || srv.clone())
-}
 fn with_hbs(
     hbs: Arc<Handlebars>,
 ) -> impl Filter<Extract = (Arc<Handlebars>,), Error = Infallible> + Clone {
     warp::any().map(move || hbs.clone())
 }
+fn with_cfg(cfg: LaadaConfig) -> impl Filter<Extract = (LaadaConfig,), Error = Infallible> + Clone {
+    warp::any().map(move || cfg.clone())
+}
 
-pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
-    let cfg = srv.lock().await.cfg.clone().web.unwrap_or_default();
-    let addr: net::SocketAddr = format!("{}:{}", cfg.host, cfg.port).parse().unwrap();
+pub async fn serve(cfg: LaadaConfig) {
+    let webcfg = cfg.clone().web.unwrap_or_default();
+    let addr: net::SocketAddr = format!("{}:{}", webcfg.host, webcfg.port).parse().unwrap();
 
     let mut hb = Handlebars::new();
     hb.register_embed_templates::<Assets>();
@@ -149,12 +135,12 @@ pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
 
     let login_route = warp::path!("login")
         .and(warp::header::<String>("Host"))
-        .and(with_srv(srv.clone()))
+        .and(with_cfg(cfg.clone()))
         .and_then(login_handler);
     let callback_route = warp::path!("login" / "callback")
         .and(warp::header::<String>("Host"))
         .and(warp::query::<HashMap<String, String>>())
-        .and(with_srv(srv.clone()))
+        .and(with_cfg(cfg.clone()))
         .and_then(callback_handler);
     let manage_route = warp::path!("manage")
         .and(warp::cookie::<String>("token"))
@@ -165,7 +151,7 @@ pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
         .and(warp::path!("manage" / "register"))
         .and(warp::cookie::<String>("token"))
         .map(|token: String| AccessToken::new("Bearer", 3600, "", token.as_str()))
-        .and(with_srv(srv.clone()))
+        .and(with_cfg(cfg.clone()))
         .and_then(register_handler);
 
     let root = warp::get().and(warp::fs::dir("static/"));

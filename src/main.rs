@@ -23,11 +23,11 @@ async fn main() -> Result<(), ::std::io::Error> {
         .try_deserialize::<laada::LaadaConfig>()
         .unwrap();
 
-    let srv = Arc::new(Mutex::new(LaadaServer::new(cfg).await));
+    let srv = Arc::new(Mutex::new(LaadaServer::new(cfg.clone()).await));
 
     // Initiate the acceptor task.
     tokio::spawn(ldap::serve(Arc::clone(&srv)));
-    tokio::spawn(http::serve(Arc::clone(&srv)));
+    tokio::spawn(http::serve(cfg));
 
     tokio::signal::ctrl_c().await?;
     Ok(())

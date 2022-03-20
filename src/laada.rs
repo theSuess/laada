@@ -63,34 +63,6 @@ impl LaadaServer {
         }
         Graph::from(&self.access_token)
     }
-    fn get_key(&self) -> Vec<u8> {
-        let kdf = argon2::Argon2::default();
-        let mut key = [0u8; 32];
-        kdf.hash_password_into(
-            self.cfg.client_secret.as_bytes(),
-            self.cfg.tenant_id.as_bytes(),
-            &mut key,
-        );
-        return key.to_vec();
-    }
-    pub fn encrypt_token(&self, token: &Vec<u8>, nonce: &Vec<u8>) -> Vec<u8> {
-        let rk = self.get_key();
-        let key = Key::from_slice(rk.as_slice());
-        let cipher = ChaCha20Poly1305::new(key);
-        let nonce = Nonce::from_slice(nonce.as_slice()); // 12-bytes; unique per message
-        cipher
-            .encrypt(nonce, token.as_slice())
-            .expect("crypto error")
-    }
-    pub fn decrypt_token(&self, enc: &Vec<u8>, nonce: &Vec<u8>) -> Vec<u8> {
-        let rk = self.get_key();
-        let key = Key::from_slice(rk.as_slice());
-        let cipher = ChaCha20Poly1305::new(key);
-        let nonce = Nonce::from_slice(nonce.as_slice()); // 12-bytes; unique per message
-        cipher
-            .decrypt(nonce, enc.as_slice())
-            .expect("invalid ciphertext")
-    }
 }
 
 impl LaadaConfig {
@@ -126,5 +98,33 @@ impl LaadaConfig {
             .code_flow()
             .authorization_url()
             .to_string()
+    }
+    pub fn encrypt_token(&self, token: &Vec<u8>, nonce: &Vec<u8>) -> Vec<u8> {
+        let rk = self.get_key();
+        let key = Key::from_slice(rk.as_slice());
+        let cipher = ChaCha20Poly1305::new(key);
+        let nonce = Nonce::from_slice(nonce.as_slice()); // 12-bytes; unique per message
+        cipher
+            .encrypt(nonce, token.as_slice())
+            .expect("crypto error")
+    }
+    pub fn decrypt_token(&self, enc: &Vec<u8>, nonce: &Vec<u8>) -> Vec<u8> {
+        let rk = self.get_key();
+        let key = Key::from_slice(rk.as_slice());
+        let cipher = ChaCha20Poly1305::new(key);
+        let nonce = Nonce::from_slice(nonce.as_slice()); // 12-bytes; unique per message
+        cipher
+            .decrypt(nonce, enc.as_slice())
+            .expect("invalid ciphertext")
+    }
+    fn get_key(&self) -> Vec<u8> {
+        let kdf = argon2::Argon2::default();
+        let mut key = [0u8; 32];
+        kdf.hash_password_into(
+            self.client_secret.as_bytes(),
+            self.tenant_id.as_bytes(),
+            &mut key,
+        );
+        return key.to_vec();
     }
 }

@@ -35,7 +35,7 @@ impl LdapSession {
         let ext = resp.unwrap();
         debug!("Extension: {:?}", ext);
 
-        let token = srv.decrypt_token(&ext.body().token, &ext.body().nonce);
+        let token = srv.cfg.decrypt_token(&ext.body().token, &ext.body().nonce);
         let totp = TOTPBuilder::new().key(token.as_slice()).finalize().unwrap();
         if totp.is_valid(sbr.pw.as_str()) {
             self.dn = sbr.dn.to_string();
