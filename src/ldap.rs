@@ -4,6 +4,7 @@ use graph_rs_sdk::error::GraphResult;
 use graph_rs_sdk::prelude::GraphResponse;
 use ldap3_proto::simple::*;
 use ldap3_proto::LdapCodec;
+use libreauth::oath::TOTPBuilder;
 use std::net;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -19,12 +20,25 @@ pub struct LdapSession {
 }
 
 impl LdapSession {
-    pub fn do_bind(&mut self, sbr: &SimpleBindRequest) -> LdapMsg {
-        if sbr.dn == "cn=Directory Manager" && sbr.pw == "password" {
+    pub async fn do_bind(&mut self, sbr: &SimpleBindRequest) -> LdapMsg {
+        let mut srv = self.srv.lock().await;
+        let client = &srv.graph_client().await;
+        let resp: GraphResult<GraphResponse<LaadaExtension>> = client
+            .v1()
+            .user(sbr.dn.as_str())
+            .get_extensions(EXTENSION_NAME)
+            .json()
+            .await;
+        if resp.is_err() {
+            return sbr.gen_invalid_cred();
+        }
+        let ext = resp.unwrap();
+        debug!("Extension: {:?}", ext);
+
+        let token = srv.decrypt_token(&ext.body().token, &ext.body().nonce);
+        let totp = TOTPBuilder::new().key(token.as_slice()).finalize().unwrap();
+        if totp.is_valid(sbr.pw.as_str()) {
             self.dn = sbr.dn.to_string();
-            sbr.gen_success()
-        } else if sbr.dn == "" && sbr.pw == "" {
-            self.dn = "Anonymous".to_string();
             sbr.gen_success()
         } else {
             sbr.gen_invalid_cred()
@@ -145,7 +159,7 @@ async fn handle_client(socket: TcpStream, srv: Arc<Mutex<LaadaServer>>) {
         };
 
         let result = match server_op {
-            ServerOps::SimpleBind(sbr) => vec![session.do_bind(&sbr)],
+            ServerOps::SimpleBind(sbr) => vec![session.do_bind(&sbr).await],
             ServerOps::Search(sr) => session.do_search(&sr).await,
             ServerOps::Unbind(_) => {
                 // No need to notify on unbind (per rfc4511)

@@ -21,3 +21,8 @@ env_logger = "0.8.4"
 warp = "0.3"
 rust-embed = "6.3.0"
 handlebars = { version="4.2.2", features = ["rust-embed"] }
+libreauth = { version="0.14", features = ["oath-uri"] }
+getrandom = "0.2"
+chacha20poly1305 = "0.9.0"
+argon2 = { version = "0.4.0", features = ["alloc"]}
+serde_with = { version = "1.12", features = ["base64"] }

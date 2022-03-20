@@ -3,12 +3,14 @@ use graph_rs_sdk::error::GraphResult;
 use graph_rs_sdk::prelude::GraphResponse;
 use graph_rs_sdk::{http::AsyncHttpClient, oauth::AccessToken, prelude::Graph};
 use handlebars::Handlebars;
+use libreauth::oath::TOTPBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net;
 use std::sync::Arc;
 use warp::hyper::Uri;
+use warp::reject::Reject;
 use warp::{Filter, Rejection, Reply};
 
 use crate::graph::*;
@@ -18,6 +20,10 @@ use rust_embed::RustEmbed;
 #[derive(RustEmbed)]
 #[folder = "static/"]
 struct Assets;
+
+#[derive(Debug)]
+struct CryptoError {}
+impl Reject for CryptoError {}
 
 pub async fn login_handler(
     host: String,
@@ -86,20 +92,25 @@ pub async fn manage_handler(
             )
         })
         .collect();
-    match resp {
-        Ok(r) => {
-            claims.insert("laada_token".to_string(), r.body().token.to_owned());
-        }
-        _ => {}
-    }
     let data = hbs
         .render("manage.html.hbs", &claims)
         .map_err(|_| warp::reject::not_found())?;
     Ok(warp::reply::html(data))
 }
-pub async fn register_handler(token: AccessToken) -> Result<impl Reply, Rejection> {
+pub async fn register_handler(
+    token: AccessToken,
+    srv: Arc<Mutex<LaadaServer>>,
+) -> Result<impl Reply, Rejection> {
     let cl: Graph<AsyncHttpClient> = Graph::from(&token);
-    let e = LaadaExtension::new("FOO".to_string());
+    let mut token = [0u8; 128];
+    let mut nonce = [0u8; 12];
+    getrandom::getrandom(&mut token).map_err(|_| warp::reject::custom(CryptoError {}))?;
+    getrandom::getrandom(&mut nonce).map_err(|_| warp::reject::custom(CryptoError {}))?;
+    let enc = srv
+        .lock()
+        .await
+        .encrypt_token(&token.to_vec(), &nonce.to_vec());
+    let e = LaadaExtension::new(enc, nonce.to_vec());
     let existing = cl.v1().me().get_extensions(EXTENSION_NAME).send().await;
     if existing.is_err() {
         let resp = cl.v1().me().create_extensions(&e).send().await;
@@ -113,7 +124,9 @@ pub async fn register_handler(token: AccessToken) -> Result<impl Reply, Rejectio
             .await;
         trace!("updated: {:?}", resp);
     }
-    Ok("method registered")
+
+    let totp = TOTPBuilder::new().key(&token).finalize().unwrap();
+    Ok(totp.key_uri_format("laada", "test").finalize())
 }
 fn with_srv(
     srv: Arc<Mutex<LaadaServer>>,
@@ -124,10 +137,6 @@ fn with_hbs(
     hbs: Arc<Handlebars>,
 ) -> impl Filter<Extract = (Arc<Handlebars>,), Error = Infallible> + Clone {
     warp::any().map(move || hbs.clone())
-}
-fn serve_static(path: &str) -> Result<impl Reply, Rejection> {
-    let asset = Assets::get(path).ok_or_else(warp::reject::not_found)?;
-    Ok(warp::reply::html(asset.data))
 }
 
 pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
@@ -156,6 +165,7 @@ pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
         .and(warp::path!("manage" / "register"))
         .and(warp::cookie::<String>("token"))
         .map(|token: String| AccessToken::new("Bearer", 3600, "", token.as_str()))
+        .and(with_srv(srv.clone()))
         .and_then(register_handler);
 
     let root = warp::get().and(warp::fs::dir("static/"));

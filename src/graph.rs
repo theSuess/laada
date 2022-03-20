@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 pub static EXTENSION_NAME: &str = "wtf.suess.laada";
 
@@ -19,18 +20,23 @@ pub struct ListUserResponse {
     pub value: Vec<ADUser>,
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LaadaExtension {
     #[serde(rename = "extensionName")]
     pub extension_name: String,
-    pub token: String,
+    #[serde_as(as = "serde_with::base64::Base64")]
+    pub token: Vec<u8>,
+    #[serde_as(as = "serde_with::base64::Base64")]
+    pub nonce: Vec<u8>,
 }
 
 impl LaadaExtension {
-    pub fn new(token: String) -> Self {
+    pub fn new(token: Vec<u8>, nonce: Vec<u8>) -> Self {
         LaadaExtension {
             extension_name: EXTENSION_NAME.to_string(),
             token,
+            nonce,
         }
     }
 }

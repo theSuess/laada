@@ -21,17 +21,10 @@
     <![endif]-->
 
     <h1>Manage {{ email }}</h1>
-    <h2> {{ oid }}</h2>
+    <h2> {{ oid }} </h2>
 
     <form method="POST" id="" action="/manage/register">
-      <input type="text" name="authenticator_name" value="" />
-      <input type="submit"/>
+      <input type="submit" value="Regenerate Token"/>
     </form>
-
-    <h3>Tokens</h3>
-    <ul>
-      <li>{{ laada_token }}</li>
-    </ul>
-
   </body>
 </html>

@@ -1,3 +1,7 @@
+use std::error::Error;
+
+use chacha20poly1305::aead::{Aead, NewAead};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce}; // Or `XChaCha20Poly1305`
 use graph_rs_sdk::http::AsyncHttpClient;
 use graph_rs_sdk::oauth::OAuth;
 use graph_rs_sdk::{client::Graph, oauth::AccessToken};
@@ -58,6 +62,34 @@ impl LaadaServer {
             self.access_token = self.cfg.new_access_token().await;
         }
         Graph::from(&self.access_token)
+    }
+    fn get_key(&self) -> Vec<u8> {
+        let kdf = argon2::Argon2::default();
+        let mut key = [0u8; 32];
+        kdf.hash_password_into(
+            self.cfg.client_secret.as_bytes(),
+            self.cfg.tenant_id.as_bytes(),
+            &mut key,
+        );
+        return key.to_vec();
+    }
+    pub fn encrypt_token(&self, token: &Vec<u8>, nonce: &Vec<u8>) -> Vec<u8> {
+        let rk = self.get_key();
+        let key = Key::from_slice(rk.as_slice());
+        let cipher = ChaCha20Poly1305::new(key);
+        let nonce = Nonce::from_slice(nonce.as_slice()); // 12-bytes; unique per message
+        cipher
+            .encrypt(nonce, token.as_slice())
+            .expect("crypto error")
+    }
+    pub fn decrypt_token(&self, enc: &Vec<u8>, nonce: &Vec<u8>) -> Vec<u8> {
+        let rk = self.get_key();
+        let key = Key::from_slice(rk.as_slice());
+        let cipher = ChaCha20Poly1305::new(key);
+        let nonce = Nonce::from_slice(nonce.as_slice()); // 12-bytes; unique per message
+        cipher
+            .decrypt(nonce, enc.as_slice())
+            .expect("invalid ciphertext")
     }
 }
 
