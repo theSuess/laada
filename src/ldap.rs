@@ -53,6 +53,8 @@ impl LdapSession {
         if lsr.base != "" && lsr.base != cfg.basedn {
             return vec![lsr.gen_error(LdapResultCode::NoSuchObject, String::from("Not found"))];
         }
+        let raw_resp = client.v1().users().list_user().send().await;
+        trace!("Graph api response: {:?}", raw_resp);
         let user_resp: GraphResult<GraphResponse<ListUserResponse>> =
             client.v1().users().list_user().json().await;
         debug!("Graph api response: {:?}", user_resp);
@@ -63,42 +65,56 @@ impl LdapSession {
             .iter()
             .map(|u| {
                 debug!("user: {:?}", u);
+                let mut attributes: Vec<LdapPartialAttribute> = vec![
+                    LdapPartialAttribute {
+                        atype: "objectClass".to_string(),
+                        vals: vec![
+                            "inetOrgPerson".to_string(),
+                            "person".to_string(),
+                            "top".to_string(),
+                        ],
+                    },
+                    LdapPartialAttribute {
+                        atype: "userPrincipalName".to_string(),
+                        vals: vec![u.upn.clone()],
+                    },
+                    LdapPartialAttribute {
+                        atype: "displayName".to_string(),
+                        vals: vec![u.display_name.clone()],
+                    },
+                    LdapPartialAttribute {
+                        atype: "uid".to_string(),
+                        vals: vec![u.id.clone()],
+                    },
+                ];
+                match &u.given_name {
+                    Some(n) => {
+                        attributes.push(LdapPartialAttribute {
+                            atype: "givenName".to_string(),
+                            vals: vec![n.to_string()],
+                        });
+                        attributes.push(LdapPartialAttribute {
+                            atype: "cn".to_string(),
+                            vals: vec![n.to_string()],
+                        });
+                    }
+                    _ => {
+                        attributes.push(LdapPartialAttribute {
+                            atype: "cn".to_string(),
+                            vals: vec![u.display_name.clone()],
+                        });
+                    }
+                }
+                match &u.surname {
+                    Some(n) => attributes.push(LdapPartialAttribute {
+                        atype: "sn".to_string(),
+                        vals: vec![n.to_string()],
+                    }),
+                    _ => {}
+                }
                 lsr.gen_result_entry(LdapSearchResultEntry {
                     dn: format!("userPrincipalName={},{}", u.upn, cfg.basedn),
-                    attributes: vec![
-                        LdapPartialAttribute {
-                            atype: "objectClass".to_string(),
-                            vals: vec![
-                                "inetOrgPerson".to_string(),
-                                "person".to_string(),
-                                "top".to_string(),
-                            ],
-                        },
-                        LdapPartialAttribute {
-                            atype: "userPrincipalName".to_string(),
-                            vals: vec![u.upn.clone()],
-                        },
-                        LdapPartialAttribute {
-                            atype: "displayName".to_string(),
-                            vals: vec![u.display_name.clone()],
-                        },
-                        LdapPartialAttribute {
-                            atype: "givenName".to_string(),
-                            vals: vec![u.given_name.clone()],
-                        },
-                        LdapPartialAttribute {
-                            atype: "cn".to_string(),
-                            vals: vec![u.given_name.clone()],
-                        },
-                        LdapPartialAttribute {
-                            atype: "sn".to_string(),
-                            vals: vec![u.surname.clone()],
-                        },
-                        LdapPartialAttribute {
-                            atype: "uid".to_string(),
-                            vals: vec![u.id.clone()],
-                        },
-                    ],
+                    attributes,
                 })
             })
             .collect();
