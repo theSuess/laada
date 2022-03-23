@@ -23,20 +23,31 @@ impl LdapSession {
     pub async fn do_bind(&mut self, sbr: &SimpleBindRequest) -> LdapMsg {
         let mut srv = self.srv.lock().await;
         let client = &srv.graph_client().await;
+        let id = id_from_dn(&sbr.dn);
+        if id.is_none() {
+            error!("Invalid user dn {:?}", sbr.dn);
+            return sbr.gen_invalid_cred();
+        }
+        trace!("User ID: {:?}", id);
         let resp: GraphResult<GraphResponse<LaadaExtension>> = client
             .v1()
-            .user(sbr.dn.as_str())
+            .user(id.unwrap())
             .get_extensions(EXTENSION_NAME)
             .json()
             .await;
         if resp.is_err() {
+            error!("Failed to get user {:?}", resp);
             return sbr.gen_invalid_cred();
         }
         let ext = resp.unwrap();
         debug!("Extension: {:?}", ext);
 
         let token = srv.cfg.decrypt_token(&ext.body().token, &ext.body().nonce);
-        let totp = TOTPBuilder::new().key(token.as_slice()).finalize().unwrap();
+        let totp = TOTPBuilder::new()
+            .key(token.as_slice())
+            .tolerance(1)
+            .finalize()
+            .unwrap();
         if totp.is_valid(sbr.pw.as_str()) {
             self.dn = sbr.dn.to_string();
             sbr.gen_success()
@@ -125,6 +136,15 @@ impl LdapSession {
     pub fn do_whoami(&mut self, wr: &WhoamiRequest) -> LdapMsg {
         wr.gen_success(format!("dn: {}", self.dn).as_str())
     }
+}
+
+fn id_from_dn(dn: &String) -> Option<&str> {
+    let mut it = dn.split(['=', ',']);
+    let selector = it.next()?;
+    if selector == "userPrincipalName" || selector == "id" {
+        return Some(it.next()?);
+    }
+    None
 }
 
 pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {
