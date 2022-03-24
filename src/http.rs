@@ -1,3 +1,4 @@
+use futures_util::future;
 use graph_rs_sdk::error::GraphResult;
 use graph_rs_sdk::prelude::GraphResponse;
 use graph_rs_sdk::{http::AsyncHttpClient, oauth::AccessToken, prelude::Graph};
@@ -24,6 +25,10 @@ struct Assets;
 #[derive(Debug)]
 struct CryptoError {}
 impl Reject for CryptoError {}
+
+#[derive(Debug)]
+struct UnauthorizedError;
+impl Reject for UnauthorizedError {}
 
 #[derive(Serialize, Deserialize)]
 struct ManageData {
@@ -145,6 +150,12 @@ pub async fn register_handler(
         .map_err(|_| warp::reject::not_found())?;
     Ok(warp::reply::html(rendered))
 }
+pub async fn render_root(hbs: Arc<Handlebars<'_>>) -> Result<impl Reply, Rejection> {
+    let rendered = hbs
+        .render("index.html.hbs", &())
+        .map_err(|_| warp::reject::not_found())?;
+    Ok(warp::reply::html(rendered))
+}
 fn with_hbs(
     hbs: Arc<Handlebars>,
 ) -> impl Filter<Extract = (Arc<Handlebars>,), Error = Infallible> + Clone {
@@ -152,6 +163,25 @@ fn with_hbs(
 }
 fn with_cfg(cfg: LaadaConfig) -> impl Filter<Extract = (LaadaConfig,), Error = Infallible> + Clone {
     warp::any().map(move || cfg.clone())
+}
+
+fn with_auth() -> impl Filter<Extract = (AccessToken,), Error = Rejection> + Clone {
+    warp::cookie::<String>("token")
+        .map(|token: String| AccessToken::new("Bearer", 3600, "", token.as_str()))
+        .and_then(move |token: AccessToken| {
+            if token.is_expired() {
+                trace!("expired token - rejecting");
+                future::err(warp::reject::custom(UnauthorizedError))
+            } else {
+                future::ok(token)
+            }
+        })
+}
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
+    if let Some(UnauthorizedError) = err.find() {
+        return Ok(warp::redirect::temporary(Uri::from_static("/login")));
+    }
+    Ok(warp::redirect::temporary(Uri::from_static("/")))
 }
 
 pub async fn serve(cfg: LaadaConfig) {
@@ -173,24 +203,25 @@ pub async fn serve(cfg: LaadaConfig) {
         .and(with_cfg(cfg.clone()))
         .and_then(callback_handler);
     let manage_route = warp::path!("manage")
-        .and(warp::cookie::<String>("token"))
-        .map(|token: String| AccessToken::new("Bearer", 3600, "", token.as_str()))
+        .and(with_auth())
         .and(with_hbs(hb.clone()))
         .and_then(manage_handler);
     let register_route = warp::post()
         .and(warp::path!("manage" / "register"))
-        .and(warp::cookie::<String>("token"))
-        .map(|token: String| AccessToken::new("Bearer", 3600, "", token.as_str()))
+        .and(with_auth())
         .and(with_cfg(cfg.clone()))
         .and(with_hbs(hb.clone()))
         .and_then(register_handler);
 
-    let root = warp::get().and(warp::fs::dir("static/"));
-    let routes = root
+    let root = warp::path::end()
+        .and(with_hbs(hb.clone()))
+        .and_then(render_root);
+    let routes = manage_route
         .or(login_route)
         .or(callback_route)
-        .or(manage_route)
-        .or(register_route);
+        .or(register_route)
+        .or(root)
+        .recover(handle_rejection);
     info!("started ldap listener on {:?}", addr);
     warp::serve(routes).run(addr).await;
 }
