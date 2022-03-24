@@ -44,8 +44,6 @@ impl LdapSession {
             return sbr.gen_invalid_cred();
         }
         let ext = resp.unwrap();
-        debug!("Extension: {:?}", ext);
-
         let token = srv.cfg.decrypt_token(&ext.body().token, &ext.body().nonce);
         let totp = TOTPBuilder::new()
             .key(token.as_slice())
@@ -102,30 +100,26 @@ impl LdapSession {
                         vals: vec![u.id.clone()],
                     },
                 ];
-                match &u.given_name {
-                    Some(n) => {
-                        attributes.push(LdapPartialAttribute {
-                            atype: "givenName".to_string(),
-                            vals: vec![n.to_string()],
-                        });
-                        attributes.push(LdapPartialAttribute {
-                            atype: "cn".to_string(),
-                            vals: vec![n.to_string()],
-                        });
-                    }
-                    _ => {
-                        attributes.push(LdapPartialAttribute {
-                            atype: "cn".to_string(),
-                            vals: vec![u.display_name.clone()],
-                        });
-                    }
+                if let Some(n) = &u.given_name {
+                    attributes.push(LdapPartialAttribute {
+                        atype: "givenName".to_string(),
+                        vals: vec![n.to_string()],
+                    });
+                    attributes.push(LdapPartialAttribute {
+                        atype: "cn".to_string(),
+                        vals: vec![n.to_string()],
+                    });
+                } else {
+                    attributes.push(LdapPartialAttribute {
+                        atype: "cn".to_string(),
+                        vals: vec![u.display_name.clone()],
+                    });
                 }
-                match &u.surname {
-                    Some(n) => attributes.push(LdapPartialAttribute {
+                if let Some(n) = &u.surname {
+                    attributes.push(LdapPartialAttribute {
                         atype: "sn".to_string(),
                         vals: vec![n.to_string()],
-                    }),
-                    _ => {}
+                    });
                 }
                 lsr.gen_result_entry(LdapSearchResultEntry {
                     dn: format!("userPrincipalName={},{}", u.upn, cfg.basedn),
@@ -180,7 +174,6 @@ async fn handle_client(socket: TcpStream, srv: Arc<Mutex<LaadaServer>>) {
     };
 
     while let Some(msg) = reqs.next().await {
-        debug!("ldap message");
         let server_op = match msg
             .map_err(|_e| ())
             .and_then(|msg| ServerOps::try_from(msg))
@@ -197,7 +190,7 @@ async fn handle_client(socket: TcpStream, srv: Arc<Mutex<LaadaServer>>) {
                 return;
             }
         };
-
+        trace!("LDAP Operation: {:?}", server_op);
         let result = match server_op {
             ServerOps::SimpleBind(sbr) => vec![session.do_bind(&sbr).await],
             ServerOps::Search(sr) => session.do_search(&sr).await,
