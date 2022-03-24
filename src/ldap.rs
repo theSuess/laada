@@ -21,7 +21,7 @@ pub struct LdapSession {
 
 impl LdapSession {
     pub async fn do_bind(&mut self, sbr: &SimpleBindRequest) -> LdapMsg {
-        if sbr.dn == "" && sbr.pw == "" {
+        if sbr.dn.is_empty() && sbr.pw.is_empty() {
             self.dn = "Anonymous".to_string();
             return sbr.gen_success();
         }
@@ -63,7 +63,7 @@ impl LdapSession {
         let client = &srv.graph_client().await;
         let cfg = srv.cfg.ldap.clone().unwrap_or_default();
 
-        if lsr.base != "" && lsr.base != cfg.basedn {
+        if !lsr.base.is_empty() && lsr.base != cfg.basedn {
             return vec![lsr.gen_error(LdapResultCode::NoSuchObject, String::from("Not found"))];
         }
         let user_resp: GraphResult<GraphResponse<ListUserResponse>> = client
@@ -159,11 +159,11 @@ fn build_filter(l: &LdapFilter) -> String {
     }
 }
 
-fn id_from_dn(dn: &String) -> Option<&str> {
+fn id_from_dn(dn: &str) -> Option<&str> {
     let mut it = dn.split(['=', ',']);
     let selector = it.next()?;
     if selector.to_lowercase() == "userprincipalname" || selector == "id" {
-        return Some(it.next()?);
+        return it.next();
     }
     None
 }
@@ -197,10 +197,7 @@ async fn handle_client(socket: TcpStream, srv: Arc<Mutex<LaadaServer>>) {
     };
 
     while let Some(msg) = reqs.next().await {
-        let server_op = match msg
-            .map_err(|_e| ())
-            .and_then(|msg| ServerOps::try_from(msg))
-        {
+        let server_op = match msg.map_err(|_e| ()).and_then(ServerOps::try_from) {
             Ok(v) => v,
             Err(_) => {
                 let _err = resp
@@ -225,12 +222,14 @@ async fn handle_client(socket: TcpStream, srv: Arc<Mutex<LaadaServer>>) {
         };
 
         for rmsg in result.into_iter() {
-            if let Err(_) = resp.send(rmsg).await {
+            if let Err(e) = resp.send(rmsg).await {
+                error!("sending response: {:?}", e);
                 return;
             }
         }
 
-        if let Err(_) = resp.flush().await {
+        if let Err(e) = resp.flush().await {
+            error!("flushing response: {:?}", e);
             return;
         }
     }

@@ -88,10 +88,10 @@ pub async fn manage_handler(
         .map(|c| {
             (
                 c.key(),
-                c.value()
-                    .as_str()
-                    .unwrap_or(c.value().to_string().as_str())
-                    .to_string(),
+                match c.value().as_str() {
+                    Some(s) => s.to_string(),
+                    None => c.value().to_string(),
+                },
             )
         })
         .collect();
@@ -117,7 +117,7 @@ pub async fn register_handler(
     let mut nonce = [0u8; 12];
     getrandom::getrandom(&mut token).map_err(|_| warp::reject::custom(CryptoError {}))?;
     getrandom::getrandom(&mut nonce).map_err(|_| warp::reject::custom(CryptoError {}))?;
-    let enc = cfg.encrypt_token(&token.to_vec(), &nonce.to_vec());
+    let enc = cfg.encrypt_token(&token, &nonce);
     let e = LaadaExtension::new(enc, nonce.to_vec());
     let existing = cl.v1().me().get_extensions(EXTENSION_NAME).send().await;
     if existing.is_err() {
