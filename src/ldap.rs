@@ -66,11 +66,21 @@ impl LdapSession {
         if lsr.base != "" && lsr.base != cfg.basedn {
             return vec![lsr.gen_error(LdapResultCode::NoSuchObject, String::from("Not found"))];
         }
-        let raw_resp = client.v1().users().list_user().send().await;
-        trace!("Graph api response: {:?}", raw_resp);
-        let user_resp: GraphResult<GraphResponse<ListUserResponse>> =
-            client.v1().users().list_user().json().await;
+        let user_resp: GraphResult<GraphResponse<ListUserResponse>> = client
+            .v1()
+            .users()
+            .list_user()
+            .filter(&[build_filter(&lsr.filter).as_str()])
+            .json()
+            .await;
         debug!("Graph api response: {:?}", user_resp);
+        if let Err(e) = user_resp {
+            error!("invalid graph api response: {:?}", e);
+            return vec![lsr.gen_error(
+                LdapResultCode::Unavailable,
+                String::from("graph api exception"),
+            )];
+        }
         let mut resp: Vec<LdapMsg> = user_resp
             .unwrap()
             .body()
@@ -136,10 +146,23 @@ impl LdapSession {
     }
 }
 
+fn build_filter(l: &LdapFilter) -> String {
+    match l {
+        LdapFilter::Present(k) => {
+            if k == "objectclass" {
+                return String::from("");
+            }
+            format!("{} ne null", k)
+        }
+        LdapFilter::Equality(k, v) => format!("{} eq '{}'", k, v),
+        _ => todo!(),
+    }
+}
+
 fn id_from_dn(dn: &String) -> Option<&str> {
     let mut it = dn.split(['=', ',']);
     let selector = it.next()?;
-    if selector == "userPrincipalName" || selector == "id" {
+    if selector.to_lowercase() == "userprincipalname" || selector == "id" {
         return Some(it.next()?);
     }
     None
