@@ -3,6 +3,10 @@ on:
     paths:
       - '**.rs'
       - '**.hbs'
+    branches:
+      - 'main'
+    tags-ignore:
+      - '*'
   pull_request:
 
 name: Continuous integration
