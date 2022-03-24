@@ -21,6 +21,10 @@ pub struct LdapSession {
 
 impl LdapSession {
     pub async fn do_bind(&mut self, sbr: &SimpleBindRequest) -> LdapMsg {
+        if sbr.dn == "" && sbr.pw == "" {
+            self.dn = "Anonymous".to_string();
+            return sbr.gen_success();
+        }
         let mut srv = self.srv.lock().await;
         let client = &srv.graph_client().await;
         let id = id_from_dn(&sbr.dn);
