@@ -17,25 +17,47 @@ pub struct LaadaConfig {
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LDAPConfig {
+    #[serde(default = "default_ldap_host")]
     pub host: String,
+    #[serde(default = "default_ldap_port")]
     pub port: u16,
+    #[serde(default = "default_ldap_basedn")]
     pub basedn: String,
 }
 
 impl Default for LDAPConfig {
     fn default() -> Self {
         LDAPConfig {
-            host: String::from("0.0.0.0"),
-            basedn: String::from("dc=laada,dc=com"),
-            port: 3389,
+            host: default_ldap_host(),
+            port: default_ldap_port(),
+            basedn: default_ldap_basedn(),
         }
     }
 }
 
+fn default_ldap_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_ldap_port() -> u16 {
+    3389
+}
+fn default_ldap_basedn() -> String {
+    "dc=laada,dc=suess,dc=wtf".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WebConfig {
+    #[serde(default = "default_web_host")]
     pub host: String,
+    #[serde(default = "default_web_port")]
     pub port: u16,
+}
+fn default_web_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_web_port() -> u16 {
+    8080
 }
 
 impl Default for WebConfig {
