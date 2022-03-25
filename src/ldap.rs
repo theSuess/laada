@@ -27,15 +27,16 @@ impl LdapSession {
         }
         let mut srv = self.srv.lock().await;
         let client = &srv.graph_client().await;
-        let id = id_from_dn(&sbr.dn);
-        if id.is_none() {
+        let raw_id = id_from_dn(&sbr.dn, &srv.cfg.upn_domains, &srv.cfg.external_issuer);
+        if raw_id.is_none() {
             error!("Invalid user dn {:?}", sbr.dn);
             return sbr.gen_invalid_cred();
         }
+        let id = raw_id.unwrap();
         trace!("User ID: {:?}", id);
         let resp: GraphResult<GraphResponse<LaadaExtension>> = client
             .v1()
-            .user(id.unwrap())
+            .user(id)
             .get_extensions(EXTENSION_NAME)
             .json()
             .await;
@@ -159,13 +160,30 @@ fn build_filter(l: &LdapFilter) -> String {
     }
 }
 
-fn id_from_dn(dn: &str) -> Option<&str> {
+fn id_from_dn(
+    dn: &str,
+    upn_domains: &Option<Vec<String>>,
+    external_issuer: &Option<String>,
+) -> Option<String> {
     let mut it = dn.split(['=', ',']);
     let selector = it.next()?;
-    if selector.to_lowercase() == "userprincipalname" || selector == "id" {
-        return it.next();
+    let id = if selector.to_lowercase() == "userprincipalname" || selector == "id" {
+        it.next()
+    } else {
+        None
+    }?;
+    if let Some(domains) = upn_domains {
+        if !domains.iter().any(|d| id.ends_with(d)) {
+            if let Some(i) = external_issuer {
+                return Some(external_upn(id, i.as_str()));
+            }
+        }
     }
-    None
+    Some(id.to_string())
+}
+
+fn external_upn(email: &str, issuer: &str) -> String {
+    format!("{}#EXT#@{}", email.replace('@', "_"), issuer)
 }
 
 pub async fn serve(srv: Arc<Mutex<LaadaServer>>) {

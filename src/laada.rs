@@ -10,6 +10,8 @@ pub struct LaadaConfig {
     tenant_id: String,
     client_id: String,
     client_secret: String,
+    pub upn_domains: Option<Vec<String>>,
+    pub external_issuer: Option<String>,
     pub ldap: Option<LDAPConfig>,
     pub web: Option<WebConfig>,
 }
