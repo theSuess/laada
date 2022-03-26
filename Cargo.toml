@@ -17,7 +17,7 @@ futures = "0.3"
 tokio-util = { version = "0.6", features = ["codec"] }
 log = "0.4.0"
 env_logger = "0.8.4"
-warp = "0.3"
+actix-web = "4"
 rust-embed = "6.3.0"
 handlebars = { version="4.2.2", features = ["rust-embed"] }
 libreauth = { version="0.14", features = ["oath-uri"] }

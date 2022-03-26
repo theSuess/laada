@@ -1,4 +1,6 @@
-use futures_util::future;
+use actix_web::{cookie::Cookie, dev::ConnectionInfo, error};
+use actix_web::{get, post, web, App, FromRequest, HttpResponse, HttpServer};
+use futures_util::future::{err, ok, Ready};
 use graph_rs_sdk::error::GraphResult;
 use graph_rs_sdk::prelude::GraphResponse;
 use graph_rs_sdk::{http::AsyncHttpClient, oauth::AccessToken, prelude::Graph};
@@ -7,12 +9,8 @@ use libreauth::oath::TOTPBuilder;
 use qrcode_generator::QrCodeEcc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::Infallible;
+use std::fmt::Display;
 use std::net;
-use std::sync::Arc;
-use warp::hyper::Uri;
-use warp::reject::Reject;
-use warp::{Filter, Rejection, Reply};
 
 use crate::graph::*;
 use crate::laada::LaadaConfig;
@@ -23,12 +21,37 @@ use rust_embed::RustEmbed;
 struct Assets;
 
 #[derive(Debug)]
-struct CryptoError {}
-impl Reject for CryptoError {}
+pub struct CryptoError;
+impl Display for CryptoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Crypto Error")
+    }
+}
+impl error::ResponseError for CryptoError {}
 
 #[derive(Debug)]
-struct UnauthorizedError;
-impl Reject for UnauthorizedError {}
+pub struct UnauthorizedError;
+impl Display for UnauthorizedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("You're not authorized")
+    }
+}
+impl error::ResponseError for UnauthorizedError {
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::TemporaryRedirect()
+            .append_header(("Location", "/login"))
+            .finish()
+    }
+}
+
+pub struct AuthenticatedUser {
+    access_token: AccessToken,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CallbackQuery {
+    pub code: String,
+}
 
 #[derive(Serialize, Deserialize)]
 struct ManageData {
@@ -43,48 +66,49 @@ struct RegisterData {
     pub qrcode: String,
 }
 
-pub async fn login_handler(host: String, cfg: LaadaConfig) -> Result<impl Reply, Rejection> {
-    let url: Uri = cfg
-        .oauth_request(format!("http://{}/login/callback", host).as_str())
-        .parse()
-        .unwrap();
-    Ok(warp::redirect::temporary(url))
+impl FromRequest for AuthenticatedUser {
+    type Error = UnauthorizedError;
+
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(
+        req: &actix_web::HttpRequest,
+        _payload: &mut actix_web::dev::Payload,
+    ) -> Self::Future {
+        let h = req.head().headers().get("Cookie");
+        if let Some(c) = h {
+            if let Ok(cs) = c.to_str() {
+                if let Some(c) = cs
+                    .to_string()
+                    .split(';')
+                    .filter_map(|x| Cookie::parse(x).ok())
+                    .find(|c| c.name() == "token")
+                {
+                    return ok(AuthenticatedUser {
+                        access_token: AccessToken::new("Bearer", 3600, "", c.value()),
+                    });
+                }
+            }
+        }
+        err(UnauthorizedError)
+    }
+}
+#[get("/")]
+async fn get_index(hb: web::Data<Handlebars<'_>>) -> HttpResponse {
+    let rendered = hb
+        .render("index.html.hbs", &())
+        .expect("resource bundling error");
+    HttpResponse::Ok().body(rendered)
 }
 
-pub async fn callback_handler(
-    host: String,
-    q: HashMap<String, String>,
-    cfg: LaadaConfig,
-) -> Result<impl Reply, Rejection> {
-    let code = q.get("code");
-    trace!("Access Code {:?}", code);
-    let mut req = cfg
-        .oauth_client()
-        .access_code(code.unwrap())
-        .redirect_uri(format!("http://{}/login/callback", host).as_str())
-        .build_async()
-        .code_flow();
-
-    trace!("req {:?}", req);
-    let token = req.access_token().send().await.unwrap();
-    trace!("Claims {:?}", token.jwt().unwrap().claims());
-    let redir = warp::redirect::temporary(Uri::from_static("/manage"));
-    Ok(warp::reply::with_header(
-        redir,
-        "set-cookie",
-        format!("token={}; Path=/", token.bearer_token()),
-    ))
-}
-
-pub async fn manage_handler(
-    token: AccessToken,
-    hbs: Arc<Handlebars<'_>>,
-) -> Result<impl Reply, Rejection> {
-    let cl: Graph<AsyncHttpClient> = Graph::from(&token);
+#[get("/manage")]
+async fn get_manage(hb: web::Data<Handlebars<'_>>, user: AuthenticatedUser) -> HttpResponse {
+    let cl: Graph<AsyncHttpClient> = Graph::from(&user.access_token);
     let resp: GraphResult<GraphResponse<LaadaExtension>> =
         cl.v1().me().get_extensions(EXTENSION_NAME).json().await;
     // TODO: there has to be a better way
-    let claims: HashMap<String, String> = token
+    let claims: HashMap<String, String> = user
+        .access_token
         .jwt()
         .unwrap()
         .claims()
@@ -107,21 +131,59 @@ pub async fn manage_handler(
         oid: claims.get("oid").unwrap().to_string(),
         token,
     };
-    let rendered = hbs
+    let rendered = hb
         .render("manage.html.hbs", &data)
-        .map_err(|_| warp::reject::not_found())?;
-    Ok(warp::reply::html(rendered))
+        .expect("correct rendering");
+    HttpResponse::Ok().body(rendered)
 }
-pub async fn register_handler(
-    token: AccessToken,
-    cfg: LaadaConfig,
-    hbs: Arc<Handlebars<'_>>,
-) -> Result<impl Reply, Rejection> {
-    let cl: Graph<AsyncHttpClient> = Graph::from(&token);
+
+#[get("/login")]
+pub async fn get_login(cfg: web::Data<LaadaConfig>, info: ConnectionInfo) -> HttpResponse {
+    let url = cfg.oauth_request(format!("http://{}/login/callback", info.host()).as_str());
+    HttpResponse::TemporaryRedirect()
+        .append_header(("Location", url.as_str()))
+        .finish()
+}
+#[get("/login/callback")]
+pub async fn get_callback(
+    cfg: web::Data<LaadaConfig>,
+    info: ConnectionInfo,
+    q: web::Query<CallbackQuery>,
+) -> HttpResponse {
+    let code = &q.code;
+    trace!("Access Code {:?}", code);
+    let mut req = cfg
+        .oauth_client()
+        .access_code(code.as_str())
+        .redirect_uri(format!("http://{}/login/callback", info.host()).as_str())
+        .build_async()
+        .code_flow();
+
+    trace!("req {:?}", req);
+    let token = req.access_token().send().await.unwrap();
+    trace!("Claims {:?}", token.jwt().unwrap().claims());
+
+    HttpResponse::TemporaryRedirect()
+        .append_header(("Location", "/manage"))
+        .cookie(
+            Cookie::build("token", token.bearer_token())
+                .path("/")
+                .http_only(true)
+                .finish(),
+        )
+        .finish()
+}
+#[post("/manage/register")]
+pub async fn post_register(
+    hb: web::Data<Handlebars<'_>>,
+    user: AuthenticatedUser,
+    cfg: web::Data<LaadaConfig>,
+) -> Result<HttpResponse, CryptoError> {
+    let cl: Graph<AsyncHttpClient> = Graph::from(&user.access_token);
     let mut token = [0u8; 128];
     let mut nonce = [0u8; 12];
-    getrandom::getrandom(&mut token).map_err(|_| warp::reject::custom(CryptoError {}))?;
-    getrandom::getrandom(&mut nonce).map_err(|_| warp::reject::custom(CryptoError {}))?;
+    getrandom::getrandom(&mut token).map_err(|_| CryptoError {})?;
+    getrandom::getrandom(&mut nonce).map_err(|_| CryptoError {})?;
     let enc = cfg.encrypt_token(&token, &nonce);
     let e = LaadaExtension::new(enc, nonce.to_vec());
     let existing = cl.v1().me().get_extensions(EXTENSION_NAME).send().await;
@@ -145,83 +207,32 @@ pub async fn register_handler(
         qrcode_generator::to_svg_to_string(&uri, QrCodeEcc::Low, 1024, None::<&str>).unwrap(),
     );
     let data = RegisterData { uri, qrcode };
-    let rendered = hbs
+    let rendered = hb
         .render("register.html.hbs", &data)
-        .map_err(|_| warp::reject::not_found())?;
-    Ok(warp::reply::html(rendered))
-}
-pub async fn render_root(hbs: Arc<Handlebars<'_>>) -> Result<impl Reply, Rejection> {
-    let rendered = hbs
-        .render("index.html.hbs", &())
-        .map_err(|_| warp::reject::not_found())?;
-    Ok(warp::reply::html(rendered))
-}
-fn with_hbs(
-    hbs: Arc<Handlebars>,
-) -> impl Filter<Extract = (Arc<Handlebars>,), Error = Infallible> + Clone {
-    warp::any().map(move || hbs.clone())
-}
-fn with_cfg(cfg: LaadaConfig) -> impl Filter<Extract = (LaadaConfig,), Error = Infallible> + Clone {
-    warp::any().map(move || cfg.clone())
+        .expect("correct rendering");
+    Ok(HttpResponse::Ok().body(rendered))
 }
 
-fn with_auth() -> impl Filter<Extract = (AccessToken,), Error = Rejection> + Clone {
-    warp::cookie::<String>("token")
-        .map(|token: String| AccessToken::new("Bearer", 3600, "", token.as_str()))
-        .and_then(move |token: AccessToken| {
-            if token.is_expired() {
-                trace!("expired token - rejecting");
-                future::err(warp::reject::custom(UnauthorizedError))
-            } else {
-                future::ok(token)
-            }
-        })
-}
-async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
-    if let Some(UnauthorizedError) = err.find() {
-        return Ok(warp::redirect::temporary(Uri::from_static("/login")));
-    }
-    Ok(warp::redirect::temporary(Uri::from_static("/")))
-}
-
-pub async fn serve(cfg: LaadaConfig) {
+pub fn serve(cfg: LaadaConfig) -> actix_web::dev::Server {
     let webcfg = cfg.clone().web.unwrap_or_default();
     let addr: net::SocketAddr = format!("{}:{}", webcfg.host, webcfg.port).parse().unwrap();
 
     let mut hb = Handlebars::new();
     hb.register_embed_templates::<Assets>()
         .expect("failed to bundle static assets");
-    let hb = Arc::new(hb);
-
-    let login_route = warp::path!("login")
-        .and(warp::header::<String>("Host"))
-        .and(with_cfg(cfg.clone()))
-        .and_then(login_handler);
-    let callback_route = warp::path!("login" / "callback")
-        .and(warp::header::<String>("Host"))
-        .and(warp::query::<HashMap<String, String>>())
-        .and(with_cfg(cfg.clone()))
-        .and_then(callback_handler);
-    let manage_route = warp::path!("manage")
-        .and(with_auth())
-        .and(with_hbs(hb.clone()))
-        .and_then(manage_handler);
-    let register_route = warp::post()
-        .and(warp::path!("manage" / "register"))
-        .and(with_auth())
-        .and(with_cfg(cfg.clone()))
-        .and(with_hbs(hb.clone()))
-        .and_then(register_handler);
-
-    let root = warp::path::end()
-        .and(with_hbs(hb.clone()))
-        .and_then(render_root);
-    let routes = manage_route
-        .or(login_route)
-        .or(callback_route)
-        .or(register_route)
-        .or(root)
-        .recover(handle_rejection);
-    info!("started ldap listener on {:?}", addr);
-    warp::serve(routes).run(addr).await;
+    let hb_ref = web::Data::new(hb);
+    info!("started http listener on {:?}", addr);
+    HttpServer::new(move || {
+        App::new()
+            .service(get_index)
+            .service(get_manage)
+            .service(get_login)
+            .service(get_callback)
+            .service(post_register)
+            .app_data(hb_ref.clone())
+            .app_data(web::Data::new(cfg.clone()))
+    })
+    .bind(addr)
+    .unwrap()
+    .run()
 }
