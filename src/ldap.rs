@@ -133,7 +133,7 @@ impl LdapSession {
                     });
                 }
                 lsr.gen_result_entry(LdapSearchResultEntry {
-                    dn: format!("userPrincipalName={},{}", u.upn, cfg.basedn),
+                    dn: format!("userPrincipalName={},{}", u.dn(), cfg.basedn),
                     attributes,
                 })
             })
