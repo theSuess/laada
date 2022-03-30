@@ -84,9 +84,12 @@ impl FromRequest for AuthenticatedUser {
                     .filter_map(|x| Cookie::parse(x).ok())
                     .find(|c| c.name() == "token")
                 {
-                    return ok(AuthenticatedUser {
-                        access_token: AccessToken::new("Bearer", 3600, "", c.value()),
-                    });
+                    let token = AccessToken::new("Bearer", 3600, "", c.value());
+                    if !token.is_expired() {
+                        return ok(AuthenticatedUser {
+                            access_token: AccessToken::new("Bearer", 3600, "", c.value()),
+                        });
+                    }
                 }
             }
         }
