@@ -139,7 +139,8 @@ async fn get_manage(hb: web::Data<Handlebars<'_>>, user: AuthenticatedUser) -> H
 
 #[get("/login")]
 pub async fn get_login(cfg: web::Data<LaadaConfig>, info: ConnectionInfo) -> HttpResponse {
-    let url = cfg.oauth_request(format!("http://{}/login/callback", info.host()).as_str());
+    let url =
+        cfg.oauth_request(format!("{}://{}/login/callback", info.scheme(), info.host()).as_str());
     HttpResponse::TemporaryRedirect()
         .append_header(("Location", url.as_str()))
         .finish()
@@ -155,7 +156,7 @@ pub async fn get_callback(
     let mut req = cfg
         .oauth_client()
         .access_code(code.as_str())
-        .redirect_uri(format!("http://{}/login/callback", info.host()).as_str())
+        .redirect_uri(format!("{}://{}/login/callback", info.scheme(), info.host()).as_str())
         .build_async()
         .code_flow();
 
