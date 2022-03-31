@@ -67,11 +67,13 @@ impl LdapSession {
         if !lsr.base.is_empty() && lsr.base != cfg.basedn {
             return vec![lsr.gen_error(LdapResultCode::NoSuchObject, String::from("Not found"))];
         }
+        let filter = build_filter(&lsr.filter, &srv.cfg.upn_domains);
+        trace!("graph search filter: {}", filter);
         let user_resp: GraphResult<GraphResponse<ListUserResponse>> = client
             .v1()
             .users()
             .list_user()
-            .filter(&[build_filter(&lsr.filter).as_str()])
+            .filter(&[filter.as_str()])
             .json()
             .await;
         debug!("Graph api response: {:?}", user_resp);
@@ -147,7 +149,7 @@ impl LdapSession {
     }
 }
 
-fn build_filter(l: &LdapFilter) -> String {
+fn build_filter(l: &LdapFilter, upn_domains: &Option<Vec<String>>) -> String {
     match l {
         LdapFilter::Present(k) => {
             if k == "objectclass" {
@@ -155,7 +157,16 @@ fn build_filter(l: &LdapFilter) -> String {
             }
             format!("{} ne null", k)
         }
-        LdapFilter::Equality(k, v) => format!("{} eq '{}'", k, v),
+        LdapFilter::Equality(k, v) => {
+            if k.to_lowercase() == "userprincipalname" {
+                if let Some(d) = upn_domains {
+                    if !d.iter().any(|x| v.ends_with(x)) {
+                        return format!("mail eq '{}'", v);
+                    }
+                }
+            }
+            format!("{} eq '{}'", k, v)
+        }
         _ => todo!(),
     }
 }
