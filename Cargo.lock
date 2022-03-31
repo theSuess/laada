@@ -1412,6 +1412,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "walkdir",
 ]
 
 [[package]]

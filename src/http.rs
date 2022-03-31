@@ -222,8 +222,17 @@ pub fn serve(cfg: LaadaConfig) -> actix_web::dev::Server {
     let addr: net::SocketAddr = format!("{}:{}", webcfg.host, webcfg.port).parse().unwrap();
 
     let mut hb = Handlebars::new();
-    hb.register_embed_templates::<Assets>()
-        .expect("failed to bundle static assets");
+    if cfg!(debug_assertions) {
+        debug!("using templates from directory");
+        hb.set_dev_mode(true);
+        hb.register_templates_directory("", "static/")
+            .expect("failed to load assets from dir");
+    } else {
+        debug!("using embedded templates");
+        hb.register_embed_templates::<Assets>()
+            .expect("failed to bundle static assets");
+    }
+
     let hb_ref = web::Data::new(hb);
     info!("started http listener on {:?}", addr);
     HttpServer::new(move || {
