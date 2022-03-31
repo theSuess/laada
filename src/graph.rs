@@ -21,9 +21,9 @@ impl ADUser {
     pub fn dn(&self) -> String {
         if self.upn.contains("#EXT#") {
             if let Some(m) = &self.mail {
-                return m.to_owned();
+                m.to_owned()
             } else {
-                self.upn.split("#EXT#").next().unwrap().replace("_", "@")
+                self.upn.split("#EXT#").next().unwrap().replace('_', "@")
             }
         } else {
             self.upn.clone()
