@@ -1,0 +1,51 @@
+{{#*inline "body"}}
+<div class="pf-c-card" id="card-basic-example">
+  <div class="pf-c-card__title pf-c-title pf-m-xl">Your TOTP Token</div>
+  <div class="pf-c-card__body pf-l-stack pf-m-gutter">
+    <div class="pf-l-stack__item">
+      <div class="pf-c-hint">
+        <div class="pf-c-hint__body">
+          This is your token for use in authentication apps like Aegis, FreeOTP
+          or Google Authenticator. Please make sure you have imported the token
+          before going back. If you loose your token, you can always generate a
+          new one. Note that by generating a new token, the old one will become
+          invalid.
+        </div>
+      </div>
+    </div>
+    <div class="pf-l-stack__item pf-l-bullseye">
+      <img class="pf-l-bullseye__item" src="data:image/svg+xml;base64,{{qrcode}}">
+
+    </div>
+    <div class="pf-l-stack__item">
+      <div class="pf-c-clipboard-copy">
+        <div class="pf-c-clipboard-copy__group">
+          <input
+            class="pf-c-form-control"
+            readonly
+            type="text"
+            value="{{uri}}"
+            id="oath-url"
+          />
+          <button
+            class="pf-c-button pf-m-control"
+            type="button"
+            aria-label="Copy to clipboard"
+            onclick="navigator.clipboard.writeText(document.querySelector('#oath-url').value).then(()=>document.querySelector('#clipboard-tooltip').style='display:block')"
+          >
+            <i class="fas fa-copy" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="pf-c-tooltip pf-m-bottom" role="tooltip" id="clipboard-tooltip" style="display:none">
+          <div class="pf-c-tooltip__arrow"></div>
+          <div class="pf-c-tooltip__content">Copied to clipboard!</div>
+        </div>
+      </div>
+    </div>
+    <div class="pf-l-stack__item">
+      <a href="/manage" class="pf-c-button pf-m-link"><i class="fa fa-angle-left"></i> Go back</a>
+    </div>
+  </div>
+</div>
+{{/inline}}
+{{> base.html.hbs}}

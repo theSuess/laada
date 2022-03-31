@@ -1,0 +1,14 @@
+{
+  "name": "laada_ui",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@patternfly/patternfly": "^4.183.1"
+  }
+}

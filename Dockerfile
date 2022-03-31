@@ -1,3 +1,9 @@
+FROM docker.io/node:17-alpine AS npm
+
+WORKDIR /src
+ADD static/dist /src
+RUN npm ci
+
 FROM docker.io/rust:1.59-alpine AS builder
 MAINTAINER Dominik Süß <dominik@suess.wtf>
 WORKDIR /usr/src/laada
@@ -15,6 +21,7 @@ ENV RUSTFLAGS="-C target-feature=-crt-static"
 COPY Cargo.toml Cargo.lock ./
 RUN cargo build --release && rm -r src
 ADD static static
+COPY --from=npm /src/node_modules static/dist/
 ADD src src
 RUN touch src/main.rs && cargo build --release
 

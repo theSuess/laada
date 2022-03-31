@@ -1,0 +1,40 @@
+{{#*inline "body"}}
+<div class="pf-c-card" id="card-basic-example">
+  <div class="pf-c-card__title">{{ user }}</div>
+  <div class="pf-c-card__body pf-l-stack pf-m-gutter">
+    <div class="pf-l-stack__item">
+      {{#if token}}
+      <div class="pf-c-alert pf-m-info">
+        <div class="pf-c-alert__icon">
+          <i class="fas fa-fw fa-info-circle" aria-hidden="true"></i>
+        </div>
+        <p class="pf-c-alert__title">
+          Your token was generated at: {{ token.created_at }}
+        </p>
+      </div>
+      {{else}}
+      <div class="pf-c-alert pf-m-warning">
+        <div class="pf-c-alert__icon">
+          <i class="fas fa-fw fa-exclamation-triangle" aria-hidden="true"></i>
+        </div>
+        <p class="pf-c-alert__title">
+          You currently do not have a token, please generate one using the button below.
+        </p>
+      </div>
+      {{/if}}
+    </div>
+    <div class="pf-l-stack__item">
+      <p>
+        Welcome to Laada. This tool is used to give you access to legacy systems,
+        which only support LDAP for authentication.
+      </p>
+    </div>
+    <div class="pf-l-stack__item">
+      <form class="pf-c-form" method="POST" id="" action="/manage/register">
+        <input class="pf-c-button pf-m-primary" type="submit" value="Regenerate Token"/>
+      </form>
+    </div>
+  </div>
+</div>
+{{/inline}}
+{{> base.html.hbs}}

@@ -6,8 +6,10 @@ use graph_rs_sdk::prelude::GraphResponse;
 use graph_rs_sdk::{http::AsyncHttpClient, oauth::AccessToken, prelude::Graph};
 use handlebars::Handlebars;
 use libreauth::oath::TOTPBuilder;
+use mime_guess::from_path;
 use qrcode_generator::QrCodeEcc;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::net;
@@ -17,8 +19,12 @@ use crate::laada::LaadaConfig;
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
-#[folder = "static/"]
-struct Assets;
+#[folder = "static/templates"]
+struct Templates;
+
+#[derive(RustEmbed)]
+#[folder = "static/dist"]
+struct Dist;
 
 #[derive(Debug)]
 pub struct CryptoError;
@@ -217,6 +223,22 @@ pub async fn post_register(
     Ok(HttpResponse::Ok().body(rendered))
 }
 
+#[get("/dist/{path:.*}")]
+async fn handle_embedded_file(path: web::Path<String>) -> HttpResponse {
+    trace!("fetching static asset {:?}", path);
+    match Dist::get(path.as_str()) {
+        Some(content) => {
+            let body: Vec<u8> = match content.data {
+                Cow::Borrowed(bytes) => bytes.into(),
+                Cow::Owned(bytes) => bytes.into(),
+            };
+            HttpResponse::Ok()
+                .content_type(from_path(path.as_str()).first_or_octet_stream().as_ref())
+                .body(body)
+        }
+        None => HttpResponse::NotFound().body("404 Not Found"),
+    }
+}
 pub fn serve(cfg: LaadaConfig) -> actix_web::dev::Server {
     let webcfg = cfg.clone().web.unwrap_or_default();
     let addr: net::SocketAddr = format!("{}:{}", webcfg.host, webcfg.port).parse().unwrap();
@@ -225,11 +247,11 @@ pub fn serve(cfg: LaadaConfig) -> actix_web::dev::Server {
     if cfg!(debug_assertions) {
         debug!("using templates from directory");
         hb.set_dev_mode(true);
-        hb.register_templates_directory("", "static/")
+        hb.register_templates_directory("", "static/templates/")
             .expect("failed to load assets from dir");
     } else {
         debug!("using embedded templates");
-        hb.register_embed_templates::<Assets>()
+        hb.register_embed_templates::<Templates>()
             .expect("failed to bundle static assets");
     }
 
@@ -242,6 +264,7 @@ pub fn serve(cfg: LaadaConfig) -> actix_web::dev::Server {
             .service(get_login)
             .service(get_callback)
             .service(post_register)
+            .service(handle_embedded_file)
             .app_data(hb_ref.clone())
             .app_data(web::Data::new(cfg.clone()))
     })
