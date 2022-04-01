@@ -1,10 +1,8 @@
 Laada
 ===
+[![Continuous integration](https://github.com/theSuess/laada/actions/workflows/ci.yml/badge.svg)](https://github.com/theSuess/laada/actions/workflows/ci.yml)
 
 _LDAP Azure Active Directory Authentication_
-
-> :warning: This project is not yet feature complete! Please do not try to use
-> it yet as things will most probably break.
 
 Laada is a small service, allowing LDAP authentication with Azure Active
 Directory as a backend. The primary use case is to allow authentication with
@@ -17,13 +15,14 @@ After a user has registerd for the first time using the web interface, the
 target flow looks like this:
 
 1. Application asks user for credentials
-2. User enters his email as username and TOTP token as password
+2. User enters their email as username and TOTP token as password
 3. The application sends this to the Laada LDAP endpoint
 4. Laada verifies this bind with the TOTP backend
 5. The bind succeeds or fails based on the response
 
 
-Laada also exposes LDAP search capabilities, backed by the Microsoft Graph API
+Laada also exposes LDAP search capabilities (currently only supporting top-level
+equality filters), backed by the Microsoft Graph API
 
 
 # FAQ
