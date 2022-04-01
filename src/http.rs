@@ -230,7 +230,7 @@ async fn handle_embedded_file(path: web::Path<String>) -> HttpResponse {
         Some(content) => {
             let body: Vec<u8> = match content.data {
                 Cow::Borrowed(bytes) => bytes.into(),
-                Cow::Owned(bytes) => bytes.into(),
+                Cow::Owned(bytes) => bytes,
             };
             HttpResponse::Ok()
                 .content_type(from_path(path.as_str()).first_or_octet_stream().as_ref())
