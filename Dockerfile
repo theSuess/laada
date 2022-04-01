@@ -21,7 +21,7 @@ ENV RUSTFLAGS="-C target-feature=-crt-static"
 COPY Cargo.toml Cargo.lock ./
 RUN cargo build --release && rm -r src
 ADD static static
-COPY --from=npm /src/node_modules static/dist/
+COPY --from=npm /src/node_modules static/dist/node_modules
 ADD src src
 RUN touch src/main.rs && cargo build --release
 
