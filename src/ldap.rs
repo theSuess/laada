@@ -69,11 +69,13 @@ impl LdapSession {
         }
         let filter = build_filter(&lsr.filter, &srv.cfg.upn_domains);
         trace!("graph search filter: {}", filter);
+
         let user_resp: GraphResult<GraphResponse<ListUserResponse>> = client
             .v1()
             .users()
             .list_user()
             .filter(&[filter.as_str()])
+            .expand(&["memberOf"])
             .json()
             .await;
         debug!("Graph api response: {:?}", user_resp);
@@ -111,6 +113,14 @@ impl LdapSession {
                     LdapPartialAttribute {
                         atype: "uid".to_string(),
                         vals: vec![u.id.clone()],
+                    },
+                    LdapPartialAttribute {
+                        atype: "memberOf".to_string(),
+                        vals: u
+                            .member_of
+                            .iter()
+                            .map(|g| g.display_name.clone().unwrap_or_else(|| g.id.clone()))
+                            .collect(),
                     },
                 ];
                 if let Some(n) = &u.given_name {

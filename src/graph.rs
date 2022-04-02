@@ -14,7 +14,16 @@ pub struct ADUser {
     pub given_name: Option<String>,
     pub surname: Option<String>,
     pub mail: Option<String>,
+    #[serde(rename = "memberOf")]
+    pub member_of: Vec<ADGroup>,
     pub id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ADGroup {
+    pub id: String,
+    #[serde(rename = "displayName")]
+    pub display_name: Option<String>,
 }
 
 impl ADUser {
