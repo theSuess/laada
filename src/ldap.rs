@@ -1,6 +1,7 @@
 use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use graph_rs_sdk::error::GraphResult;
+use graph_rs_sdk::header::HeaderValue;
 use graph_rs_sdk::prelude::GraphResponse;
 use ldap3_proto::simple::*;
 use ldap3_proto::LdapCodec;
@@ -64,20 +65,39 @@ impl LdapSession {
         let client = &srv.graph_client().await;
         let cfg = srv.cfg.ldap.clone().unwrap_or_default();
 
-        if !lsr.base.is_empty() && lsr.base != cfg.basedn {
+        if !lsr.base.is_empty() && !lsr.base.ends_with(cfg.basedn.as_str()) {
             return vec![lsr.gen_error(LdapResultCode::NoSuchObject, String::from("Not found"))];
         }
+
+        let group = group_from_dn(lsr.base.as_str(), cfg.basedn.as_str());
+        trace!("group: {:?}", group);
         let filter = build_filter(&lsr.filter, &srv.cfg.upn_domains);
         trace!("graph search filter: {}", filter);
 
-        let user_resp: GraphResult<GraphResponse<ListUserResponse>> = client
-            .v1()
-            .users()
-            .list_user()
-            .filter(&[filter.as_str()])
-            .expand(&["memberOf"])
-            .json()
-            .await;
+        let user_resp: GraphResult<GraphResponse<ListUserResponse>> = match group {
+            Some(gid) => {
+                client
+                    .v1()
+                    .group(&gid)
+                    .list_members()
+                    .cast("microsoft.graph.user")
+                    .filter(&[filter.as_str()])
+                    .expand(&["memberOf"])
+                    .header("ConsistencyLevel", HeaderValue::from_static("eventual"))
+                    .json()
+                    .await
+            }
+            None => {
+                client
+                    .v1()
+                    .users()
+                    .list_user()
+                    .expand(&["memberOf"])
+                    .filter(&[filter.as_str()])
+                    .json()
+                    .await
+            }
+        };
         debug!("Graph api response: {:?}", user_resp);
         if let Err(e) = user_resp {
             error!("invalid graph api response: {:?}", e);
@@ -168,15 +188,24 @@ fn build_filter(l: &LdapFilter, upn_domains: &Option<Vec<String>>) -> String {
             format!("{} ne null", k)
         }
         LdapFilter::Equality(k, v) => {
-            if k.to_lowercase() == "userprincipalname" {
-                if let Some(d) = upn_domains {
-                    if !d.iter().any(|x| v.ends_with(x)) {
-                        return format!("mail eq '{}'", v);
+            match k.to_lowercase().as_str() {
+                "userprincipalname" => {
+                    if let Some(d) = upn_domains {
+                        if !d.iter().any(|x| v.ends_with(x)) {
+                            return format!("mail eq '{}'", v);
+                        }
                     }
                 }
+                "memberof" => return format!("memberOf/any(g:g/displayName eq '{}')", v),
+                _ => {}
             }
             format!("{} eq '{}'", k, v)
         }
+        LdapFilter::And(fs) => fs
+            .iter()
+            .map(|f| format!("({})", build_filter(f, upn_domains)))
+            .collect::<Vec<String>>()
+            .join(" and "),
         _ => todo!(),
     }
 }
@@ -201,6 +230,18 @@ fn id_from_dn(
         }
     }
     Some(id.to_string())
+}
+
+fn group_from_dn(dn: &str, base_dn: &str) -> Option<String> {
+    if dn.is_empty() || dn == base_dn {
+        return None;
+    }
+    let mut it = dn.split(['=', ',']);
+    let selector = it.next()?;
+    if selector.to_lowercase() == "ou" {
+        return it.next().map(|x| x.to_string());
+    }
+    None
 }
 
 fn external_upn(email: &str, issuer: &str) -> String {
