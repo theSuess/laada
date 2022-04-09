@@ -34,6 +34,33 @@
         <input class="pf-c-button pf-m-primary" type="submit" value="Regenerate Token"/>
       </form>
     </div>
+    {{#if token}}
+    <div class="pf-l-stack__item">
+      <form class="pf-c-form" method="POST" id="" action="/manage/pin">
+        <div class="pf-c-form__group">
+            <div class="pf-c-form__group-label">
+              <label
+                class="pf-c-form__label"
+                for="pin"
+              >
+                <span class="pf-c-form__label-text">Pin</span>
+                <span class="pf-c-form__label-required" aria-hidden="true">&#42;</span>
+              </label>
+            </div>
+            <div class="pf-c-form__group-control">
+              <input
+                class="pf-c-form-control"
+                type="password"
+                id="pin"
+                name="pin"
+                required
+              />
+            </div>
+          </div>
+          <input class="pf-c-button pf-m-primary" type="submit" value="Set Pin"/>
+      </form>
+    </div>
+    {{/if}}
   </div>
 </div>
 {{/inline}}

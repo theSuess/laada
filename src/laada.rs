@@ -1,3 +1,4 @@
+use argon2::PasswordHasher;
 use chacha20poly1305::aead::{Aead, NewAead};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce}; // Or `XChaCha20Poly1305`
 use graph_rs_sdk::http::AsyncHttpClient;
@@ -121,19 +122,26 @@ impl LaadaConfig {
             .authorization_url()
             .to_string()
     }
-    pub fn encrypt_token(&self, token: &[u8], nonce: &[u8]) -> Vec<u8> {
+    pub fn encrypt(&self, token: &[u8], nonce: &[u8]) -> Vec<u8> {
         let rk = self.get_key();
         let key = Key::from_slice(rk.as_slice());
         let cipher = ChaCha20Poly1305::new(key);
         let nonce = Nonce::from_slice(nonce); // 12-bytes; unique per message
         cipher.encrypt(nonce, token).expect("crypto error")
     }
-    pub fn decrypt_token(&self, enc: &[u8], nonce: &[u8]) -> Vec<u8> {
+    pub fn decrypt(&self, enc: &[u8], nonce: &[u8]) -> Vec<u8> {
         let rk = self.get_key();
         let key = Key::from_slice(rk.as_slice());
         let cipher = ChaCha20Poly1305::new(key);
         let nonce = Nonce::from_slice(nonce); // 12-bytes; unique per message
         cipher.decrypt(nonce, enc).expect("invalid ciphertext")
+    }
+    pub fn hash_pin(&self, pin: &str, nonce: &[u8]) -> String {
+        let salt = base64::encode(nonce);
+        let kdf = argon2::Argon2::default();
+        kdf.hash_password(pin.as_bytes(), &salt)
+            .expect("hash to compute successfully")
+            .to_string()
     }
     fn get_key(&self) -> Vec<u8> {
         let kdf = argon2::Argon2::default();

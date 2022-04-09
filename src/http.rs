@@ -1,3 +1,4 @@
+use actix_web::http::StatusCode;
 use actix_web::{cookie::Cookie, dev::ConnectionInfo, error};
 use actix_web::{get, post, web, App, FromRequest, HttpResponse, HttpServer};
 use futures_util::future::{err, ok, Ready};
@@ -13,6 +14,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::net;
+use std::sync::Arc;
 
 use crate::graph::*;
 use crate::laada::LaadaConfig;
@@ -27,26 +29,53 @@ struct Templates;
 struct Dist;
 
 #[derive(Debug)]
-pub struct CryptoError;
-impl Display for CryptoError {
+pub enum Error<'a> {
+    Crypto,
+    Unauthorized,
+    NoTokenRegistered(Arc<Handlebars<'a>>),
+    InvalidPinFormat(Arc<Handlebars<'a>>),
+    FailedUpdate(Arc<Handlebars<'a>>),
+}
+impl Display for Error<'static> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Crypto Error")
+        match self {
+            Self::Unauthorized => f.write_str("You are not authorized to perform this action"),
+            Self::Crypto => f.write_str(
+                "An error occured while performing cryptographic functions on the server",
+            ),
+            Self::NoTokenRegistered(_) => f.write_str("You need to register a token first"),
+            Self::InvalidPinFormat(_) => f.write_str(
+                "Your pin may not include \":\" as it is used to separate the pin from the token",
+            ),
+            Self::FailedUpdate(_) => {
+                f.write_str("Failed to update resources in the Graph API, please try again later")
+            }
+        }
     }
 }
-impl error::ResponseError for CryptoError {}
-
-#[derive(Debug)]
-pub struct UnauthorizedError;
-impl Display for UnauthorizedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("You're not authorized")
-    }
-}
-impl error::ResponseError for UnauthorizedError {
+impl error::ResponseError for Error<'static> {
     fn error_response(&self) -> HttpResponse {
-        HttpResponse::TemporaryRedirect()
-            .append_header(("Location", "/login"))
-            .finish()
+        match self {
+            Self::Unauthorized => HttpResponse::TemporaryRedirect()
+                .append_header(("Location", "/login"))
+                .finish(),
+            Self::NoTokenRegistered(hb) | Self::InvalidPinFormat(hb) | Self::FailedUpdate(hb) => {
+                let body = hb
+                    .render(
+                        "error.html.hbs",
+                        &ErrorData {
+                            message: self.to_string(),
+                        },
+                    )
+                    .expect("error page to render correctly");
+                HttpResponse::BadRequest().body(body)
+            }
+            _ => HttpResponse::InternalServerError().body(self.to_string()),
+        }
+    }
+
+    fn status_code(&self) -> StatusCode {
+        StatusCode::INTERNAL_SERVER_ERROR
     }
 }
 
@@ -57,6 +86,11 @@ pub struct AuthenticatedUser {
 #[derive(Serialize, Deserialize)]
 pub struct CallbackQuery {
     pub code: String,
+}
+
+#[derive(Deserialize)]
+pub struct PinFormData {
+    pub pin: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -72,8 +106,13 @@ struct RegisterData {
     pub qrcode: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ErrorData {
+    pub message: String,
+}
+
 impl FromRequest for AuthenticatedUser {
-    type Error = UnauthorizedError;
+    type Error = Error<'static>;
 
     type Future = Ready<Result<Self, Self::Error>>;
 
@@ -99,7 +138,7 @@ impl FromRequest for AuthenticatedUser {
                 }
             }
         }
-        err(UnauthorizedError)
+        err(Error::Unauthorized)
     }
 }
 #[get("/")]
@@ -188,13 +227,13 @@ pub async fn post_register(
     hb: web::Data<Handlebars<'_>>,
     user: AuthenticatedUser,
     cfg: web::Data<LaadaConfig>,
-) -> Result<HttpResponse, CryptoError> {
+) -> Result<HttpResponse, Error<'_>> {
     let cl: Graph<AsyncHttpClient> = Graph::from(&user.access_token);
     let mut token = [0u8; 128];
     let mut nonce = [0u8; 12];
-    getrandom::getrandom(&mut token).map_err(|_| CryptoError {})?;
-    getrandom::getrandom(&mut nonce).map_err(|_| CryptoError {})?;
-    let enc = cfg.encrypt_token(&token, &nonce);
+    getrandom::getrandom(&mut token).map_err(|_| Error::Crypto)?;
+    getrandom::getrandom(&mut nonce).map_err(|_| Error::Crypto)?;
+    let enc = cfg.encrypt(&token, &nonce);
     let e = LaadaExtension::new(enc, nonce.to_vec());
     let existing = cl.v1().me().get_extensions(EXTENSION_NAME).send().await;
     if existing.is_err() {
@@ -221,6 +260,40 @@ pub async fn post_register(
         .render("register.html.hbs", &data)
         .expect("correct rendering");
     Ok(HttpResponse::Ok().body(rendered))
+}
+
+#[post("/manage/pin")]
+pub async fn post_pin(
+    hb: web::Data<Handlebars<'_>>,
+    user: AuthenticatedUser,
+    cfg: web::Data<LaadaConfig>,
+    form: web::Form<PinFormData>,
+) -> Result<HttpResponse, Error<'_>> {
+    if form.pin.contains(':') {
+        return Err(Error::InvalidPinFormat(hb.into_inner()));
+    }
+    let cl: Graph<AsyncHttpClient> = Graph::from(&user.access_token);
+    let resp: GraphResult<GraphResponse<LaadaExtension>> =
+        cl.v1().me().get_extensions(EXTENSION_NAME).json().await;
+    if resp.is_err() {
+        return Err(Error::NoTokenRegistered(hb.into_inner()));
+    }
+    let mut ext = resp.unwrap().body().clone();
+    let hash = cfg.hash_pin(form.pin.as_str(), &ext.nonce);
+    let enc = cfg.encrypt(hash.as_bytes(), &ext.nonce);
+    ext.pin = enc;
+    let resp = cl
+        .v1()
+        .me()
+        .update_extensions(EXTENSION_NAME, &ext)
+        .send()
+        .await;
+    if resp.is_err() {
+        return Err(Error::FailedUpdate(hb.into_inner()));
+    }
+    Ok(HttpResponse::SeeOther()
+        .append_header(("Location", "/manage"))
+        .finish())
 }
 
 #[get("/dist/{path:.*}")]
@@ -264,6 +337,7 @@ pub fn serve(cfg: LaadaConfig) -> actix_web::dev::Server {
             .service(get_login)
             .service(get_callback)
             .service(post_register)
+            .service(post_pin)
             .service(handle_embedded_file)
             .app_data(hb_ref.clone())
             .app_data(web::Data::new(cfg.clone()))

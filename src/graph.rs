@@ -54,7 +54,14 @@ pub struct LaadaExtension {
     pub token: Vec<u8>,
     #[serde_as(as = "serde_with::base64::Base64")]
     pub nonce: Vec<u8>,
+    #[serde_as(as = "serde_with::base64::Base64")]
+    #[serde(default = "pin_default")]
+    pub pin: Vec<u8>,
     pub created_at: DateTime<Utc>,
+}
+
+fn pin_default() -> Vec<u8> {
+    vec![]
 }
 
 impl LaadaExtension {
@@ -62,6 +69,7 @@ impl LaadaExtension {
         LaadaExtension {
             extension_name: Some(EXTENSION_NAME.to_string()),
             created_at: Utc::now(),
+            pin: vec![],
             token,
             nonce,
         }

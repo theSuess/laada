@@ -1,3 +1,4 @@
+use argon2::{PasswordHash, PasswordVerifier};
 use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use graph_rs_sdk::error::GraphResult;
@@ -46,13 +47,30 @@ impl LdapSession {
             return sbr.gen_invalid_cred();
         }
         let ext = resp.unwrap();
-        let token = srv.cfg.decrypt_token(&ext.body().token, &ext.body().nonce);
+        trace!("ext: {:?}", ext);
+        let token = srv.cfg.decrypt(&ext.body().token, &ext.body().nonce);
+
+        if !ext.body().pin.is_empty() {
+            trace!("user has pin set");
+            let ph = srv.cfg.decrypt(&ext.body().pin, &ext.body().nonce);
+            if argon2::Argon2::default()
+                .verify_password(
+                    sbr.pw.split(':').next().unwrap().as_bytes(),
+                    &PasswordHash::new(std::str::from_utf8(&ph).unwrap()).unwrap(),
+                )
+                .is_err()
+            {
+                return sbr.gen_invalid_cred();
+            }
+        }
+
         let totp = TOTPBuilder::new()
             .key(token.as_slice())
             .tolerance(1)
             .finalize()
             .unwrap();
-        if totp.is_valid(sbr.pw.as_str()) {
+        let totp_input = sbr.pw.split(':').last().unwrap();
+        if totp.is_valid(totp_input) {
             self.dn = sbr.dn.to_string();
             sbr.gen_success()
         } else {
@@ -98,7 +116,6 @@ impl LdapSession {
                     .await
             }
         };
-        debug!("Graph api response: {:?}", user_resp);
         if let Err(e) = user_resp {
             error!("invalid graph api response: {:?}", e);
             return vec![lsr.gen_error(
@@ -112,7 +129,6 @@ impl LdapSession {
             .value
             .iter()
             .map(|u| {
-                debug!("user: {:?}", u);
                 let mut attributes: Vec<LdapPartialAttribute> = vec![
                     LdapPartialAttribute {
                         atype: "objectClass".to_string(),
